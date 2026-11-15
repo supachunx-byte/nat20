@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   qualification:
-    name: Pinned native baseline + source-gap audit
+    name: Pinned baseline + source audit + independent knockout probes
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -48,6 +48,30 @@ jobs:
           set -euo pipefail
           cargo test --locked --workspace 2>&1 | tee ce02-native-tests.log
 
+      - name: Run CE-02 independent knockout probes (negative controls may fail)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ai_engine_ce02/run_acceptance.py --repo-root . --output ce02-independent-gates.json --log-dir ce02-probe-logs 2>&1 | tee ce02-independent-runner.log
+
+      - name: Display independent gate classifications
+        if: always()
+        shell: bash
+        run: |
+          if test -f ce02-independent-gates.json; then
+            python3 - <<'PYCODE' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          report = json.load(open('ce02-independent-gates.json', encoding='utf8'))
+          print('## CE-02 independent gate evidence')
+          print('**Native 338/338 is not independent acceptance.**')
+          print('| Gate | Classification |')
+          print('|---|---|')
+          for gate in ('G07', 'G08', 'G09'):
+              print(f"| {gate} | {report['gates'].get(gate, {}).get('status', 'NOT_EXECUTED')} |")
+          print('G08 is a serializer capability check, not a crash-restart test.')
+          PYCODE
+          fi
+
       - name: Preserve source and native test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -58,5 +82,8 @@ jobs:
             ce02-native-tests.log
             ce02-changed-files.txt
             ce02-evaluation-head.txt
+            ce02-independent-gates.json
+            ce02-independent-runner.log
+            ce02-probe-logs/*.log
           if-no-files-found: warn
           retention-days: 30
